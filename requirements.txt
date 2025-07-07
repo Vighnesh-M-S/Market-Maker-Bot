@@ -1,0 +1,3 @@
+numpy>=1.25.0,<2
+cython
+setuptools==80.8.0
