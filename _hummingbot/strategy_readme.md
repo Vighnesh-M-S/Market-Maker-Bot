@@ -28,101 +28,7 @@ price_source: mid / last
 
 ## 🔄 Order Placement Logic (Flow)
 
-###🔹 1. Connector & Trading Pair Initialization
-  ✅ Fetch the exchange connector via:
-  connector = self.connectors[self.config.exchange]
-  ✅ Parse base_asset and quote_asset from the trading pair (e.g., ETH-USDT → ETH, USDT)
 
-###🔹 2. Fetch Account Balances
-  ✅ Get current wallet balances:
-  Base asset (e.g., ETH)
-  Quote asset (e.g., USDT)
-  ⛔ If balances are None or unavailable:
-  Log a warning or skip order placement (risk of using stale data)
-
-###🔹 3. Fetch Market Price
-  ✅ Get mid-price or last-traded price:
-  ref_price = connector.get_price_by_type(...)
-  Used for:
-  Valuing holdings
-  Anchoring buy/sell order price levels
-
-###🔹 4. Calculate Inventory Value
-  🧮 Compute:
-  base_value = base_balance * ref_price
-  total_value = base_value + quote_balance
-  inventory_ratio = base_value / total_value
-  ⛔ If total value = 0:
-  Use fallback ratio (e.g., 0.5), or skip placement
-
-###🔹 5. Apply Exposure Filter (Hard Limits)
-  ✅ Check:
-  If inventory_ratio < 10% or > 90%
-  ⛔ If exposure is too unbalanced:
-  Log warning
-  ❌ Skip placing orders
-
-###🔹 6. Detect Market Trend
-  ✅ Call self.trend = self.detect_trend()
-  Uses candle data to classify trend:
-  📈 Uptrend → accumulate base
-  📉 Downtrend → reduce base
-  ⏸️ Neutral → keep 50/50
-  ⛔ If trend data not available:
-  Default to neutral behavior
-
-###🔹 7. Set Target Base Ratio
-  Based on trend:
-  Uptrend → 65%
-  Downtrend → 35%
-  Neutral → 50%
-
-###🔹 8. Adjust Spread Based on Inventory Deviation
-  📐 Compute:
-  inventory_diff = inventory_ratio - target_base_ratio
-  spread_adjustment = inventory_diff * 0.02
-  Affects how aggressive the buy/sell spreads are
-  Keeps portfolio from drifting off target
-
-###🔹 9. Volatility-Based Spread Calculation
-  ✅ Call self.calculate_volatility()
-  Uses candle std deviation of 1m close prices
-  Normalizes to % spread
-  ✅ Clamp spread multiplier:
-  Between 0.1% and 1%
-
-###🔹 10. Smooth Spread Transitions
-  ✅ Use Exponential Moving Average (EMA-like):
-  spread_multiplier = α * new + (1 - α) * old
-  Prevents jitter due to noisy volatility changes
-
-###🔹 11. Generate Final Buy/Sell Prices
-  🧠 Logic based on trend:
-  Uptrend → tighter buy, looser sell
-  Downtrend → tighter sell, looser buy
-  Neutral → Use dynamic spreads with adjustment
-
-###🔹 12. Apply Price Clipping
-  ✅ Clamp final prices within ±3% of mid-price
-  ⛔ Prevents:
-  Placing wildly off-market orders
-  Trading at non-competitive levels
-
-###🔹 13. Check for Inventory Imbalance
-  If inventory_ratio < 15% or > 85%:
-  ⚠️ Imbalance too high
-  ❌ Skip order placement
-
-###🔹 14. Return Buy and Sell Order Candidates
-  📤 Returns:
-  OrderCandidate(BUY)
-  OrderCandidate(SELL)
-  With calculated price, amount, and side
-  ✅ If Everything Passes:
-  Orders are placed with safe, optimized pricing.
-  ❌ If Any Step Fails (data missing, exposure too high, etc.):
-  Orders are skipped for that cycle
-  Protects against bad trades, overexposure, or low-liquidity situations
 
 
 
@@ -262,6 +168,102 @@ Logic
 ---
 
 ## Market Signal Flow Diagram (create_proposal() Logic):
+
+### 🔹 1. Connector & Trading Pair Initialization
+  ✅ Fetch the exchange connector via:
+  connector = self.connectors[self.config.exchange]
+  ✅ Parse base_asset and quote_asset from the trading pair (e.g., ETH-USDT → ETH, USDT)
+
+### 🔹 2. Fetch Account Balances
+  ✅ Get current wallet balances:
+  Base asset (e.g., ETH)
+  Quote asset (e.g., USDT)
+  ⛔ If balances are None or unavailable:
+  Log a warning or skip order placement (risk of using stale data)
+
+### 🔹 3. Fetch Market Price
+  ✅ Get mid-price or last-traded price:
+  ref_price = connector.get_price_by_type(...)
+  Used for:
+  Valuing holdings
+  Anchoring buy/sell order price levels
+
+### 🔹 4. Calculate Inventory Value
+  🧮 Compute:
+  base_value = base_balance * ref_price
+  total_value = base_value + quote_balance
+  inventory_ratio = base_value / total_value
+  ⛔ If total value = 0:
+  Use fallback ratio (e.g., 0.5), or skip placement
+
+### 🔹 5. Apply Exposure Filter (Hard Limits)
+  ✅ Check:
+  If inventory_ratio < 10% or > 90%
+  ⛔ If exposure is too unbalanced:
+  Log warning
+  ❌ Skip placing orders
+
+### 🔹 6. Detect Market Trend
+  ✅ Call self.trend = self.detect_trend()
+  Uses candle data to classify trend:
+  📈 Uptrend → accumulate base
+  📉 Downtrend → reduce base
+  ⏸️ Neutral → keep 50/50
+  ⛔ If trend data not available:
+  Default to neutral behavior
+
+### 🔹 7. Set Target Base Ratio
+  Based on trend:
+  Uptrend → 65%
+  Downtrend → 35%
+  Neutral → 50%
+
+### 🔹 8. Adjust Spread Based on Inventory Deviation
+  📐 Compute:
+  inventory_diff = inventory_ratio - target_base_ratio
+  spread_adjustment = inventory_diff * 0.02
+  Affects how aggressive the buy/sell spreads are
+  Keeps portfolio from drifting off target
+
+### 🔹 9. Volatility-Based Spread Calculation
+  ✅ Call self.calculate_volatility()
+  Uses candle std deviation of 1m close prices
+  Normalizes to % spread
+  ✅ Clamp spread multiplier:
+  Between 0.1% and 1%
+
+### 🔹 10. Smooth Spread Transitions
+  ✅ Use Exponential Moving Average (EMA-like):
+  spread_multiplier = α * new + (1 - α) * old
+  Prevents jitter due to noisy volatility changes
+
+### 🔹 11. Generate Final Buy/Sell Prices
+  🧠 Logic based on trend:
+  Uptrend → tighter buy, looser sell
+  Downtrend → tighter sell, looser buy
+  Neutral → Use dynamic spreads with adjustment
+
+### 🔹 12. Apply Price Clipping
+  ✅ Clamp final prices within ±3% of mid-price
+  ⛔ Prevents:
+  Placing wildly off-market orders
+  Trading at non-competitive levels
+
+### 🔹 13. Check for Inventory Imbalance
+  If inventory_ratio < 15% or > 85%:
+  ⚠️ Imbalance too high
+  ❌ Skip order placement
+
+### 🔹 14. Return Buy and Sell Order Candidates
+  📤 Returns:
+  OrderCandidate(BUY)
+  OrderCandidate(SELL)
+  With calculated price, amount, and side
+  ✅ If Everything Passes:
+  Orders are placed with safe, optimized pricing.
+  ❌ If Any Step Fails (data missing, exposure too high, etc.):
+  Orders are skipped for that cycle
+  Protects against bad trades, overexposure, or low-liquidity situations
 ```bash
 ┌─────────────────────────────┐
 │  Start: Fetch Exchange Data │
