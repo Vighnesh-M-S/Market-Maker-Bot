@@ -70,54 +70,88 @@ class SimplePMM(ScriptStrategyBase):
         connector = self.connectors[self.config.exchange]
         base_asset, quote_asset = self.config.trading_pair.split("-")
 
+        # Balances and ref price
         base_balance = Decimal(connector.get_balance(base_asset))
         quote_balance = Decimal(connector.get_balance(quote_asset))
-        ref_price = self.connectors[self.config.exchange].get_price_by_type(
-            self.config.trading_pair, self.price_source
-        )
+        ref_price = connector.get_price_by_type(self.config.trading_pair, self.price_source)
 
+        # Inventory value and ratio
         base_value = base_balance * ref_price
         total_value = base_value + quote_balance
         inventory_ratio = base_value / total_value if total_value > 0 else Decimal("0.5")
+
+        # === 1. Exposure Limits ===
+        max_exposure = Decimal("0.90")
+        if inventory_ratio < (1 - max_exposure) or inventory_ratio > max_exposure:
+            self.logger().warning("❌ Exposure too high, skipping order placement.")
+            return []
+
+        # === 2. Trend & Target Inventory Ratio ===
+        self.trend = self.detect_trend()
+        if self.trend == "uptrend":
+            self.target_base_ratio = Decimal("0.65")
+        elif self.trend == "downtrend":
+            self.target_base_ratio = Decimal("0.35")
+        else:
+            self.target_base_ratio = Decimal("0.5")
+
+        # === 3. Spread Adjustment Based on Inventory ===
         inventory_diff = inventory_ratio - self.target_base_ratio
         spread_adjustment = inventory_diff * Decimal("0.02")
 
+        # === 4. Volatility-based Spread ===
         volatility = self.calculate_volatility()
-        spread_multiplier = max(Decimal("0.001"), min(volatility * Decimal("5"), Decimal("0.01")))
-        self.trend = self.detect_trend()
+        raw_spread = max(Decimal("0.001"), min(volatility * Decimal("5"), Decimal("0.01")))
 
+        # === 5. Smooth Spread Transition ===
+        if not hasattr(self, "prev_spread_multiplier"):
+            self.prev_spread_multiplier = raw_spread
+        smoothing_alpha = Decimal("0.2")
+        spread_multiplier = (
+            smoothing_alpha * raw_spread + (Decimal("1") - smoothing_alpha) * self.prev_spread_multiplier
+        )
+        self.prev_spread_multiplier = spread_multiplier
+
+        # === 6. Final Buy/Sell Prices ===
         if self.trend == "uptrend":
-            # tighter buy, wider sell
             buy_price = ref_price * Decimal("0.9995")
             sell_price = ref_price * Decimal("1.002")
         elif self.trend == "downtrend":
-            # tighter sell, wider buy
             buy_price = ref_price * Decimal("0.998")
             sell_price = ref_price * Decimal("1.0015")
-
         else:
+            buy_price = ref_price * (Decimal("1") - spread_multiplier + spread_adjustment)
+            sell_price = ref_price * (Decimal("1") + spread_multiplier + spread_adjustment)
 
-            buy_price = ref_price * (Decimal(1) - spread_multiplier + spread_adjustment)
-            sell_price = ref_price * (Decimal(1) + spread_multiplier + spread_adjustment)
+        # === 7. Price Clipping ===
+        clip_limit = Decimal("0.03")  # max 3% deviation from mid
+        buy_price = max(ref_price * (1 - clip_limit), min(buy_price, ref_price * (1 + clip_limit)))
+        sell_price = min(ref_price * (1 + clip_limit), max(sell_price, ref_price * (1 - clip_limit)))
+
+        # === 8. Imbalance Filter ===
+        if inventory_ratio < Decimal("0.15") or inventory_ratio > Decimal("0.85"):
+            self.logger().info("⚠️ Inventory imbalance too high, skipping order placement.")
+            return []
 
         return [
-            OrderCandidate(
-                trading_pair=self.config.trading_pair,
-                is_maker=True,
-                order_type=OrderType.LIMIT,
-                order_side=TradeType.BUY,
-                amount=self.config.order_amount,
-                price=buy_price,
-            ),
-            OrderCandidate(
-                trading_pair=self.config.trading_pair,
-                is_maker=True,
-                order_type=OrderType.LIMIT,
-                order_side=TradeType.SELL,
-                amount=self.config.order_amount,
-                price=sell_price,
-            )
-        ]
+                OrderCandidate(
+                    trading_pair=self.config.trading_pair,
+                    is_maker=True,
+                    order_type=OrderType.LIMIT,
+                    order_side=TradeType.BUY,
+                    amount=self.config.order_amount,
+                    price=buy_price,
+                ),
+                OrderCandidate(
+                    trading_pair=self.config.trading_pair,
+                    is_maker=True,
+                    order_type=OrderType.LIMIT,
+                    order_side=TradeType.SELL,
+                    amount=self.config.order_amount,
+                    price=sell_price,
+                )
+            ]
+
 
     def calculate_volatility(self, length: int = 30) -> Decimal:
         try:
