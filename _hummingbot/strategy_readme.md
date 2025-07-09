@@ -79,7 +79,7 @@ price_source: mid / last
     When volatility is high, widen the spread up to 1%.
 
 Logic
-
+```bash
 ├── 1️⃣ Volatility Signal
 │   ├── Purpose: Adjust spread width based on market choppiness
 │   ├── Source: Standard deviation of candle closes over N periods
@@ -91,7 +91,7 @@ Logic
 │   └── Use: 
 │       - Higher volatility → Wider spreads (less aggressive)
 │       - Lower volatility → Tighter spreads (more aggressive)
-
+```
 
 ### 2. Trend Detection
 - A trend is a directional movement of price over a recent time window (e.g., 5–15 mins).
