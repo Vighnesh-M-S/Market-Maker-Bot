@@ -158,6 +158,27 @@ class SimplePMM(ScriptStrategyBase):
             self.logger().warning(f"Trend detection failed: {str(e)}")
             return "sideways"
 
+    def inventory_ratio(self):
+        base = self.connectors[self.config.exchange].get_balance("ETH")
+        quote = self.connectors[self.config.exchange].get_balance("USDT")
+        price = self.connectors[self.config.exchange].get_price(self.config.trading_pair)
+        base_value = base * price
+        total_value = base_value + quote
+        return base_value / total_value if total_value > 0 else Decimal("0")
+
+    def adjust_spreads_based_on_inventory(self, base_ratio: Decimal):
+        """
+        Adjust spread to encourage balancing:
+        - If too much ETH → sell aggressively
+        - If too much USDT → buy aggressively
+        """
+        if base_ratio > Decimal("0.6"):  # too much ETH, widen buy spread
+            return Decimal("0.002"), Decimal("0.0005")
+        elif base_ratio < Decimal("0.4"):  # too much USDT, widen sell spread
+            return Decimal("0.0005"), Decimal("0.002")
+        else:  # balanced
+            return Decimal("0.001"), Decimal("0.001")
+
     def adjust_proposal_to_budget(self, proposal: List[OrderCandidate]) -> List[OrderCandidate]:
         return self.connectors[self.config.exchange].budget_checker.adjust_candidates(proposal, all_or_none=True)
 
@@ -187,12 +208,24 @@ class SimplePMM(ScriptStrategyBase):
         lines = []
 
         try:
+            connector = self.connectors[self.config.exchange]
+            base_asset, quote_asset = self.config.trading_pair.split("-")
+
+            base_balance = Decimal(connector.get_balance(base_asset))
+            quote_balance = Decimal(connector.get_balance(quote_asset))
             ref_price = self.connectors[self.config.exchange].get_price_by_type(
                 self.config.trading_pair, self.price_source
             )
+            base_value = base_balance * ref_price
+            total_value = base_value + quote_balance
+
+            inventory_ratio = base_value / total_value if total_value > 0 else Decimal("0.5")
+
             volatility = self.calculate_volatility()
             trend = getattr(self, "trend", "neutral")
             spread_multiplier = max(Decimal("0.001"), min(volatility * Decimal("5"), Decimal("0.01")))
+            inventory_diff = inventory_ratio - self.target_base_ratio
+            spread_adjustment = inventory_diff * Decimal("0.02")
 
             if trend == "uptrend":
                 buy_price = ref_price * (Decimal("1") - spread_multiplier * Decimal("0.5"))
@@ -201,20 +234,24 @@ class SimplePMM(ScriptStrategyBase):
                 buy_price = ref_price * (Decimal("1") - spread_multiplier * Decimal("1.5"))
                 sell_price = ref_price * (Decimal("1") + spread_multiplier * Decimal("0.5"))
             else:
-                buy_price = ref_price * (Decimal("1") - spread_multiplier)
-                sell_price = ref_price * (Decimal("1") + spread_multiplier)
+                buy_price = ref_price * (Decimal(1) - spread_multiplier + spread_adjustment)
+                sell_price = ref_price * (Decimal(1) + spread_multiplier + spread_adjustment)
 
             lines.append("📊 Strategy Status:")
             lines.append(f"  Exchange        : {self.config.exchange}")
             lines.append(f"  Trading Pair    : {self.config.trading_pair}")
             lines.append(f"  Ref Price       : {round(ref_price, 2)} USDT")
             lines.append(f"📍 Trend Detected: {trend.capitalize()}")
-            lines.append(f"  Volatility (30) : {round(volatility * 100, 4)}%")
+            lines.append(f"  Volatility (normalized): {volatility:.5f}")
+            lines.append(f"  Inventory Ratio (Base): {inventory_ratio:.4%}")
             lines.append(f"  Spread Mult     : {round(spread_multiplier * 100, 4)}%")
+            lines.append(f"  Base Balance: {base_balance:.4f} {base_asset}")
+            lines.append(f"  Quote Balance: {quote_balance:.2f} {quote_asset}")
             lines.append(f"  Buy Price       : {round(buy_price, 2)}")
             lines.append(f"  Sell Price      : {round(sell_price, 2)}")
-            lines.append(f"📐 Inventory Ratio: {round(base_ratio * 100, 2)}%")
+           
             lines.append(f"📦 Order Size: {self.config.order_amount} {self.config.trading_pair.split('-')[0]}")
+
         except Exception as e:
             lines.append(f"⚠️ Error fetching price info: {e}")
 
