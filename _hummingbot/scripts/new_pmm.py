@@ -38,6 +38,7 @@ class SimplePMM(ScriptStrategyBase):
         super().__init__(connectors)
         self.config = config
 
+
         # Initialize candles for volatility
         self.candles = CandlesFactory.get_candle(CandlesConfig(
             connector="binance",
@@ -47,8 +48,14 @@ class SimplePMM(ScriptStrategyBase):
         ))
         self.candles.start()
 
-    def on_stop(self):
-        self.candles.stop()
+        self.target_base_ratio = Decimal("0.5")
+
+    # def on_stop(self):
+    #     self.cancel_all_orders()
+        
+    #     self.candles.stop()
+
+    #     self.logger().info(f"🛑 Strategy stopped. All orders cancelled for {self.config.trading_pair}.")
 
     def on_tick(self):
         if self.create_timestamp <= self.current_timestamp:
@@ -57,17 +64,41 @@ class SimplePMM(ScriptStrategyBase):
             proposal_adjusted = self.adjust_proposal_to_budget(proposal)
             self.place_orders(proposal_adjusted)
             self.create_timestamp = self.config.order_refresh_time + self.current_timestamp
+            
 
     def create_proposal(self) -> List[OrderCandidate]:
+        connector = self.connectors[self.config.exchange]
+        base_asset, quote_asset = self.config.trading_pair.split("-")
+
+        base_balance = Decimal(connector.get_balance(base_asset))
+        quote_balance = Decimal(connector.get_balance(quote_asset))
         ref_price = self.connectors[self.config.exchange].get_price_by_type(
             self.config.trading_pair, self.price_source
         )
 
+        base_value = base_balance * ref_price
+        total_value = base_value + quote_balance
+        inventory_ratio = base_value / total_value if total_value > 0 else Decimal("0.5")
+        inventory_diff = inventory_ratio - self.target_base_ratio
+        spread_adjustment = inventory_diff * Decimal("0.02")
+
         volatility = self.calculate_volatility()
         spread_multiplier = max(Decimal("0.001"), min(volatility * Decimal("5"), Decimal("0.01")))
+        self.trend = self.detect_trend()
 
-        buy_price = ref_price * (Decimal(1) - spread_multiplier)
-        sell_price = ref_price * (Decimal(1) + spread_multiplier)
+        if self.trend == "uptrend":
+            # tighter buy, wider sell
+            buy_price = ref_price * Decimal("0.9995")
+            sell_price = ref_price * Decimal("1.002")
+        elif self.trend == "downtrend":
+            # tighter sell, wider buy
+            buy_price = ref_price * Decimal("0.998")
+            sell_price = ref_price * Decimal("1.0015")
+
+        else:
+
+            buy_price = ref_price * (Decimal(1) - spread_multiplier + spread_adjustment)
+            sell_price = ref_price * (Decimal(1) + spread_multiplier + spread_adjustment)
 
         return [
             OrderCandidate(
@@ -102,6 +133,30 @@ class SimplePMM(ScriptStrategyBase):
         except Exception as e:
             self.logger().warning(f"Volatility calculation failed: {str(e)}")
             return Decimal("0.0")
+        
+    def detect_trend(self, fast: int = 5, slow: int = 20) -> str:
+        """
+        Detects trend direction based on moving average crossover.
+        Returns: "uptrend", "downtrend", or "sideways"
+        """
+        try:
+            df = self.candles.candles_df
+            if df is None or len(df) < slow:
+                return "sideways"
+
+            closes = df["close"]
+            ma_fast = closes.rolling(window=fast).mean().iloc[-1]
+            ma_slow = closes.rolling(window=slow).mean().iloc[-1]
+
+            if ma_fast > ma_slow:
+                return "uptrend"
+            elif ma_fast < ma_slow:
+                return "downtrend"
+            else:
+                return "sideways"
+        except Exception as e:
+            self.logger().warning(f"Trend detection failed: {str(e)}")
+            return "sideways"
 
     def adjust_proposal_to_budget(self, proposal: List[OrderCandidate]) -> List[OrderCandidate]:
         return self.connectors[self.config.exchange].budget_checker.adjust_candidates(proposal, all_or_none=True)
@@ -136,19 +191,30 @@ class SimplePMM(ScriptStrategyBase):
                 self.config.trading_pair, self.price_source
             )
             volatility = self.calculate_volatility()
+            trend = getattr(self, "trend", "neutral")
             spread_multiplier = max(Decimal("0.001"), min(volatility * Decimal("5"), Decimal("0.01")))
 
-            buy_price = ref_price * (Decimal(1) - spread_multiplier)
-            sell_price = ref_price * (Decimal(1) + spread_multiplier)
+            if trend == "uptrend":
+                buy_price = ref_price * (Decimal("1") - spread_multiplier * Decimal("0.5"))
+                sell_price = ref_price * (Decimal("1") + spread_multiplier * Decimal("1.5"))
+            elif trend == "downtrend":
+                buy_price = ref_price * (Decimal("1") - spread_multiplier * Decimal("1.5"))
+                sell_price = ref_price * (Decimal("1") + spread_multiplier * Decimal("0.5"))
+            else:
+                buy_price = ref_price * (Decimal("1") - spread_multiplier)
+                sell_price = ref_price * (Decimal("1") + spread_multiplier)
 
             lines.append("📊 Strategy Status:")
             lines.append(f"  Exchange        : {self.config.exchange}")
             lines.append(f"  Trading Pair    : {self.config.trading_pair}")
-            lines.append(f"  Ref Price       : {round(ref_price, 2)}")
+            lines.append(f"  Ref Price       : {round(ref_price, 2)} USDT")
+            lines.append(f"📍 Trend Detected: {trend.capitalize()}")
             lines.append(f"  Volatility (30) : {round(volatility * 100, 4)}%")
             lines.append(f"  Spread Mult     : {round(spread_multiplier * 100, 4)}%")
             lines.append(f"  Buy Price       : {round(buy_price, 2)}")
             lines.append(f"  Sell Price      : {round(sell_price, 2)}")
+            lines.append(f"📐 Inventory Ratio: {round(base_ratio * 100, 2)}%")
+            lines.append(f"📦 Order Size: {self.config.order_amount} {self.config.trading_pair.split('-')[0]}")
         except Exception as e:
             lines.append(f"⚠️ Error fetching price info: {e}")
 
