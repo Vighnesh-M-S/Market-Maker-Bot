@@ -28,6 +28,7 @@ price_source: mid / last
 
 ## 🔄 Order Placement Logic (Flow)
 
+```bash
 ┌────────────────────────────┐
 │        Bot Starts          │
 └────────────┬───────────────┘
@@ -59,6 +60,8 @@ price_source: mid / last
       Wait until next tick
               ▼
       Repeat on_tick() cycle
+  
+```
 
 
 ---
@@ -110,6 +113,7 @@ Logic
 
 Logic
 
+```bash
 ├── 2️⃣ Trend Signal
 │   ├── Purpose: Bias quote placement toward market direction
 │   ├── Source: Moving average slope or crossover
@@ -130,6 +134,7 @@ Logic
 │           • Wider buy (conservative)
 │       - Neutral:
 │           • Spread multiplier based pricing
+```
 
 ### 3. Inventory Ratio Logic
 - To maintain a target ratio of base vs quote asset (e.g., 50/50 or 60/40), while adapting spreads based on current portfolio imbalance.
@@ -140,6 +145,7 @@ Logic
 - Base-heavy: Inventory Ratio > Target (e.g., holding too much ETH)
 - Quote-heavy: Inventory Ratio < Target (e.g., holding too much USDT)
 
+```bash
 ├── 3️⃣ Inventory Signal
 │   ├── Purpose: Keep base/quote ratio near a desired target (e.g., 50/50)
 │   ├── Source: Wallet balances + reference price
@@ -153,12 +159,12 @@ Logic
 │       - If you're holding *too much base*, widen buy spread (reduce buys)
 │       - If you're holding *too much quote*, widen sell spread (reduce sells)
 │       - Helps maintain neutrality and reduce exposure risk
-
+```
 
 ---
 
 ## Market Signal Flow Diagram (create_proposal() Logic):
-
+```bash
 ┌─────────────────────────────┐
 │  Start: Fetch Exchange Data │
 └────────────┬────────────────┘
@@ -236,6 +242,7 @@ Logic
       (Wait refresh_time)                                         |  
              │ <--------------------------------------------------
              └────────── Back to Start 🔁
+```
 
 ## 📊 Sample `format_status()` Output
 
