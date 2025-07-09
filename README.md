@@ -50,6 +50,9 @@ start -script new_pmm.py -conf conf_new_pmm.py
 ## 🎥 Video Tutorials
 
    📌  
+   
+   https://github.com/user-attachments/assets/cf852202-ffcf-45bd-a05a-2f03eac074e3
+
 
 - 📽️ Strategy Explanation Video
 - 🔄 Live Trading Demo
