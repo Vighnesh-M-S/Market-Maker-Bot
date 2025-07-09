@@ -346,13 +346,18 @@ Logic
 
 ## 📊 Sample `format_status()` Output
 
+<img width="617" alt="Screenshot 2025-07-09 at 11 08 17 PM" src="https://github.com/user-attachments/assets/69ad8c4b-1565-4169-8abc-a04d707d05bb" />
 
 
 ---
 
 ## 🎥 Video Demo
 
-📌 _Insert YouTube/Drive link to your demo recording_
+📌 
+
+https://github.com/user-attachments/assets/eac8be8e-0371-4204-8ef4-eba7a35adec5
+
+
 
 ---
 
